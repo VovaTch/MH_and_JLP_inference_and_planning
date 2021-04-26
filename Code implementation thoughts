@@ -1,0 +1,21 @@
+LambdaBelief overview:
+- Take together a bunch of beliefs
+- One geometric measurement updates them all.
+- One semantic measurement updates one of them.
+- Do I need to separately update Lambda?
+- Do statistics over lambda, extract them on call. (Dirichlet?)
+
+* Include planner in Lambda belief?
+
+Hybrid belief:
+* Create the following functions:
+- Sample continuous ML.
+- Sample continuous single (from the GMM).
+- Sample discrete ML.
+- Sample discrete single (from classifier model).
+
+* Include planner in Hybrid belief?
+
+
+
+

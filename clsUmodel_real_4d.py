@@ -1,0 +1,160 @@
+from __future__ import print_function
+import numpy as np
+import gtsam
+import joint_lambda_pose_factor_2d
+#import cls_un_model_4d
+from gtsam.symbol_shorthand import X, O, L
+
+# JLP factor use in python
+class JLPModel:
+
+    def __init__(self, exp_add_1, exp_add_2, exp_add_3, exp_add_4, exp_add_5,
+                 rinf_add_1, rinf_add_2, rinf_add_3, rinf_add_4, rinf_add_5):
+
+        # Model initialization
+        joint_lambda_pose_factor_2d.initialize_python_objects(exp_add_1, exp_add_2, exp_add_3,
+                                                                   exp_add_4, exp_add_5,
+                                                                   rinf_add_1, rinf_add_2, rinf_add_3,
+                                                                   rinf_add_4, rinf_add_5)
+
+        # Symbol initialization
+        self.X = lambda i: X(i)
+        self.XO = lambda j: O(j)
+        self.Lam = lambda k: L(k)
+
+    # Lambda numbering is a000000b where a is the object and b is the number of time steps
+    def add_measurements(self, measurement_exp, measurement_cov, new_da_realization, graph, initial, da_realization):
+        """
+
+        :type graph: gtsam.NonlinearFactorGraph
+        :type initial: gtsam.Values
+        """
+
+        # Adding a factor per each measurement with corresponding data association realization
+        measurement_number = 0
+        path_length = len(da_realization)
+        for realization in new_da_realization:
+            realization = int(realization)
+            lam_realization = int(realization * 1e6 + path_length)
+
+            # Flatten the covariance matrix
+            deploy_matrix = self.flatten_cov(measurement_cov[measurement_number])
+
+            # Find the previous realization
+            lam_realization_prev = self.find_prev_lambda(initial, path_length, realization)
+            lam_realization_prev = int(lam_realization_prev)
+
+            graph.add(joint_lambda_pose_factor_2d.JLPFactor(self.X(path_length), self.XO(realization),
+                                                              self.Lam(lam_realization_prev), self.Lam(lam_realization),
+                                                              measurement_exp[measurement_number], deploy_matrix))
+            measurement_number += 1
+
+            # Initialization of object of the realization
+            if initial.exists(self.Lam(lam_realization_prev)) is False:
+                initial.insert(self.Lam(lam_realization_prev), np.array([0., 0., 0., 0.]))
+
+            if initial.exists(self.Lam(lam_realization)) is False:
+                initial.insert(self.Lam(lam_realization), np.array([0., 0., 0., 0.]))
+
+    # Find the previous step
+    def find_prev_lambda(self, initial, path_length, object):
+
+        for idx in range(path_length - 1, -1, -1):
+            if initial.exists(self.Lam(int(object * 1e6 + idx))):
+                return object * 1e6 + idx
+
+    # Flatten a covariance matrix:
+    @staticmethod
+    def flatten_cov(covariance_matrix, matrix_len=4):
+
+        deploy_matrix = list()
+        for idx_1 in range(matrix_len):
+            for idx_2 in range(idx_1, matrix_len):
+                deploy_matrix.append(covariance_matrix[idx_1, idx_2])
+
+        return deploy_matrix
+
+    # Construct a covariance matrix from a flatten covariance
+    @staticmethod
+    def unflatten_rinf(straight_cov, matrix_len=4):
+
+        matrix = np.zeros((matrix_len, matrix_len))
+        counter = 0
+        for idx_1 in range(matrix_len):
+            for idx_2 in range(idx_1, matrix_len):
+                matrix[idx_1, idx_2] = straight_cov[counter]
+                counter += 1
+
+        return matrix
+
+    # Construct a covariance matrix from a flatten covariance
+    @staticmethod
+    def unflatten_cov(straight_cov, matrix_len=4):
+
+        matrix = np.zeros((matrix_len, matrix_len))
+        counter = 0
+        for idx_1 in range(matrix_len):
+            for idx_2 in range(idx_1, matrix_len):
+                matrix[idx_1, idx_2] = straight_cov[counter]
+                matrix[idx_2, idx_1] = straight_cov[counter]
+                counter += 1
+
+        return matrix
+
+    # Find the log pdf value
+    def log_pdf_value(self, measurement_exp, measurement_cov, point_x, point_xo, lambda_prev, lambda_cur):
+        """
+
+        :type point_x: gtsam.Pose3
+        :type point_xo: gtsam.Pose3
+        :type lambda_prev: gtsam.Point2
+        :type lambda_cur: gtsam.Point2
+        """
+        aux_factor = joint_lambda_pose_factor_2d.JLPFactor(1, 2, 3, 4, measurement_exp,
+                                                             self.flatten_cov(measurement_cov))
+        value = gtsam.Values()
+        value.insert(1, point_x)
+        value.insert(2, point_xo)
+        value.insert(3, lambda_prev)
+        value.insert(4, lambda_cur)
+
+        return aux_factor.error(value)
+
+    # Extract expectation and covariance of classifier uncertainty model
+    def sample_lambda_model(self, chosen_cls, relative_position):
+
+        relative_position_mod = np.array([relative_position[0], relative_position[1], 0.0])
+
+        if chosen_cls == 1:
+            output_list = joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_1(np.array(relative_position_mod))
+        elif chosen_cls == 2:
+            output_list = joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_2(np.array(relative_position_mod))
+        elif chosen_cls == 3:
+            output_list = joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_3(np.array(relative_position_mod))
+        elif chosen_cls == 4:
+            output_list = joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_4(np.array(relative_position_mod))
+        elif chosen_cls == 5:
+            output_list = joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_5(np.array(relative_position_mod))
+
+        # print('----------------------------------------------------------')
+        # print('relative position: ' + str(relative_position_mod))
+        # print(
+        #     'Net output 1: ' + str(joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_1(np.array(relative_position_mod))))
+        # print(
+        #     'Net output 2: ' + str(joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_2(np.array(relative_position_mod))))
+        # print(
+        #     'Net output 3: ' + str(joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_3(np.array(relative_position_mod))))
+        # print(
+        #     'Net output 4: ' + str(joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_4(np.array(relative_position_mod))))
+        # print(
+        #     'Net output 5: ' + str(joint_lambda_pose_factor_2d.AuxOutputsJLP.net_output_5(np.array(relative_position_mod))))
+
+
+        exp = output_list[0:4].tolist()
+        rinf = np.array(self.unflatten_rinf(output_list[4:14]))
+        cov = np.linalg.inv(np.matmul(rinf.transpose(), rinf))
+
+        return exp, cov
+
+
+
